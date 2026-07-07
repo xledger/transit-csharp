@@ -1,0 +1,28 @@
+name: Build .NET assemblies and test
+
+on:
+  push:
+    branches: [ "master" ]
+    paths:
+      - 'src/**'
+      - '!src/Transit.Benchmarks/**'
+  pull_request:
+    branches: [ "master" ]
+    paths:
+      - 'src/**'
+      - '!src/Transit.Benchmarks/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: [ubuntu-latest, arc]
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+        cache: true
+        cache-dependency-path: 'src/Directory.Packages.props'
+    - run: dotnet restore src/Transit.Tests/Transit.Tests.csproj
+    - run: dotnet build src/Transit.Tests/Transit.Tests.csproj --no-restore
+    - run: dotnet test src/Transit.Tests/Transit.Tests.csproj --no-build --verbosity normal
