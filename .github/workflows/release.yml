@@ -39,7 +39,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dotnet pack --configuration Release -p:Version="$version" src/Transit
+          dotnet pack --configuration Release -p:Version="$version" src/Transit -o src/Transit/bin/Release
           ls src/Transit/bin/Release/
 
       - name: Push package to GitHub Packages
