@@ -15,14 +15,12 @@ on:
 
 jobs:
   build:
-    runs-on: [ubuntu-latest, arc]
+    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-dotnet@v4
+    - uses: actions/checkout@v7
+    - uses: actions/setup-dotnet@v5.4.0
       with:
         dotnet-version: '10.0.x'
-        cache: true
-        cache-dependency-path: 'src/Directory.Packages.props'
     - run: dotnet restore src/Transit.Tests/Transit.Tests.csproj
     - run: dotnet build src/Transit.Tests/Transit.Tests.csproj --no-restore
     - run: dotnet test src/Transit.Tests/Transit.Tests.csproj --no-build --verbosity normal
