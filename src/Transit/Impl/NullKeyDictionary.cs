@@ -148,7 +148,7 @@ internal sealed class NullKeyDictionary : IDictionary, IDictionary<object?, obje
         public object Current => Entry;
 
         KeyValuePair<object?, object?> IEnumerator<KeyValuePair<object?, object?>>.Current => _onNull
-            ? new KeyValuePair<object?, object?>(null!, _dict._nullValue)
+            ? new KeyValuePair<object?, object?>(null, _dict._nullValue)
             : new KeyValuePair<object?, object?>(_innerEnum.Current.Key, _innerEnum.Current.Value);
 
         public void Dispose() { }
