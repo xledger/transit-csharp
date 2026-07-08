@@ -136,12 +136,12 @@ internal sealed class ListReadHandler : IListReadHandler
 {
     public object FromRepresentation(object representation) => representation;
 
-    public IListReader ListReader() => new LinkedListReader();
+    public IListReader ListReader() => new ListWrapperReader();
 
-    private sealed class LinkedListReader : IListReader
+    private sealed class ListWrapperReader : IListReader
     {
-        public object Init() => new LinkedList<object>();
-        public object Add(object list, object item) { ((LinkedList<object>)list).AddLast(item); return list; }
+        public object Init() => new ListWrapper();
+        public object Add(object list, object item) { ((ListWrapper)list).Add(item); return list; }
         public object Complete(object list) => list;
     }
 }

@@ -47,6 +47,7 @@ internal static class WriterFactory
             [typeof(ITaggedValue)] = new TaggedValueWriteHandler(),
             [typeof(ISet<>)] = new SetWriteHandler(),
             [typeof(IEnumerable)] = new EnumerableWriteHandler(),
+            [typeof(ListWrapper)] = new EnumerableWriteHandler(),
             [typeof(IList<>)] = listHandler,
             [typeof(IDictionary<,>)] = new DictionaryWriteHandler(),
             [typeof(NullKeyDictionary)] = new DictionaryWriteHandler(),
