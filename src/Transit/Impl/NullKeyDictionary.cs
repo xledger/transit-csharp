@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 
 namespace Transit.Net.Impl;
 
@@ -6,7 +7,7 @@ namespace Transit.Net.Impl;
 /// A dictionary that supports null keys, matching Java's HashMap behavior.
 /// Used by cmap (composite-key map) read handling where null can be a valid key.
 /// </summary>
-internal sealed class NullKeyDictionary : IDictionary
+internal sealed class NullKeyDictionary : IDictionary, IDictionary<object?, object?>, IReadOnlyDictionary<object?, object?>
 {
     private readonly Dictionary<object, object?> _inner = new();
     private bool _hasNullKey;
@@ -26,10 +27,16 @@ internal sealed class NullKeyDictionary : IDictionary
 
     public int Count => _inner.Count + (_hasNullKey ? 1 : 0);
 
-    public bool Contains(object? key)
+    public bool ContainsKey(object? key)
         => key is null ? _hasNullKey : _inner.ContainsKey(key);
 
-    public ICollection Keys
+    bool IDictionary.Contains(object? key) => ContainsKey(key);
+
+    bool ICollection<KeyValuePair<object?, object?>>.Contains(KeyValuePair<object?, object?> kvp) => kvp.Key is null
+        ? _hasNullKey && EqualityComparer<object>.Default.Equals(kvp.Value, _nullValue)
+        : ((ICollection<KeyValuePair<object, object?>>)_inner).Contains(kvp);
+
+    public ICollection<object?> Keys
     {
         get
         {
@@ -41,11 +48,15 @@ internal sealed class NullKeyDictionary : IDictionary
         }
     }
 
-    public ICollection Values
+    IEnumerable<object?> IReadOnlyDictionary<object?, object?>.Keys => Keys;
+
+    ICollection IDictionary.Keys => (ICollection)Keys;
+
+    public ICollection<object?> Values
     {
         get
         {
-            if (!_hasNullKey) return (ICollection)_inner.Values;
+            if (!_hasNullKey) return _inner.Values;
             var values = new List<object?>(_inner.Count + 1);
             foreach (var v in _inner.Values) values.Add(v);
             values.Add(_nullValue);
@@ -53,26 +64,69 @@ internal sealed class NullKeyDictionary : IDictionary
         }
     }
 
+    IEnumerable<object?> IReadOnlyDictionary<object?, object?>.Values => Values;
+
+    ICollection IDictionary.Values => (ICollection)Values;
+
     public bool IsFixedSize => false;
     public bool IsReadOnly => false;
     public bool IsSynchronized => false;
     public object SyncRoot => this;
 
     public void Add(object key, object? value) => this[key] = value;
+
+    void ICollection<KeyValuePair<object?, object?>>.Add(KeyValuePair<object?, object?> kvp) => Add(kvp.Key, kvp.Value);
+
     public void Clear() { _inner.Clear(); _hasNullKey = false; _nullValue = null; }
-    public void Remove(object key)
+
+    public bool Remove(object? key)
     {
-        if (key is null) { _hasNullKey = false; _nullValue = null; }
-        else _inner.Remove(key);
+        if (key is null)
+        {
+            if (_hasNullKey)
+            {
+                _hasNullKey = false;
+                _nullValue = null;
+                return true;
+            }
+            return false;
+        }
+        return _inner.Remove(key);
     }
 
+    void IDictionary.Remove(object key) => Remove(key);
+
+    bool ICollection<KeyValuePair<object?, object?>>.Remove(KeyValuePair<object?, object?> item)
+        => throw new NotImplementedException();
+
     public void CopyTo(Array array, int index) => throw new NotImplementedException();
+
+    void ICollection<KeyValuePair<object?, object?>>.CopyTo(KeyValuePair<object?, object?>[] array, int arrayIndex)
+        => throw new NotImplementedException();
 
     public IDictionaryEnumerator GetEnumerator() => new NullKeyEnumerator(this);
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    private sealed class NullKeyEnumerator : IDictionaryEnumerator
+    IEnumerator<KeyValuePair<object?, object?>> IEnumerable<KeyValuePair<object?, object?>>.GetEnumerator()
+        => new NullKeyEnumerator(this);
+
+    public bool TryGetValue(object? key, out object? value)
+    {
+        if (key is null)
+        {
+            if (_hasNullKey)
+            {
+                value = _nullValue;
+                return true;
+            }
+            value = default;
+            return false;
+        }
+        return _inner.TryGetValue(key, out value);
+    }
+
+    private sealed class NullKeyEnumerator : IDictionaryEnumerator, IEnumerator<KeyValuePair<object?, object?>>
     {
         private readonly NullKeyDictionary _dict;
         private readonly IEnumerator<KeyValuePair<object, object?>> _innerEnum;
@@ -92,6 +146,12 @@ internal sealed class NullKeyDictionary : IDictionary
         public object Key => Entry.Key;
         public object? Value => Entry.Value;
         public object Current => Entry;
+
+        KeyValuePair<object?, object?> IEnumerator<KeyValuePair<object?, object?>>.Current => _onNull
+            ? new KeyValuePair<object?, object?>(null!, _dict._nullValue)
+            : new KeyValuePair<object?, object?>(_innerEnum.Current.Key, _innerEnum.Current.Value);
+
+        public void Dispose() { }
 
         public bool MoveNext()
         {
