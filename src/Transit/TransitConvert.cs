@@ -20,7 +20,7 @@ public static class TransitConvert
     {
         using var ms = new MemoryStream();
         SerializeObject(value, ms, format, settings);
-        return Encoding.UTF8.GetString(ms.ToArray());
+        return Encoding.UTF8.GetString(new ReadOnlySpan<byte>(ms.GetBuffer(), 0, (int)ms.Length));
     }
 
     /// <summary>
