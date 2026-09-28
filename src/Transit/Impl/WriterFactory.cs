@@ -83,15 +83,6 @@ internal static class WriterFactory
         return dict.ToFrozenDictionary();
     }
 
-    private static void SetSubHandler(FrozenDictionary<Type, IWriteHandler> handlers, AbstractEmitter emitter)
-    {
-        foreach (var handler in handlers.Values)
-        {
-            if (handler is IAbstractEmitterAware aware)
-                aware.SetEmitter(emitter);
-        }
-    }
-
     private static FrozenDictionary<Type, IWriteHandler> GetVerboseHandlers(FrozenDictionary<Type, IWriteHandler> handlers)
     {
         var dict = new Dictionary<Type, IWriteHandler>(handlers.Count);
@@ -115,12 +106,10 @@ internal static class WriterFactory
         {
             var verboseHandlers = GetVerboseHandlers(handlers);
             emitter = new JsonVerboseEmitter(jsonWriter, verboseHandlers, defaultWriteHandler, transform);
-            SetSubHandler(verboseHandlers, emitter);
         }
         else
         {
             emitter = new JsonEmitter(jsonWriter, handlers, defaultWriteHandler, transform);
-            SetSubHandler(handlers, emitter);
         }
 
         var wc = new WriteCache(!verboseMode);

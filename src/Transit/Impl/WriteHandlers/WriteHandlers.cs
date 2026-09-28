@@ -173,10 +173,12 @@ internal sealed class EnumerableWriteHandler : AbstractWriteHandler
 
 internal sealed class DictionaryWriteHandler : AbstractWriteHandler, IAbstractEmitterAware
 {
-    private AbstractEmitter? _emitter;
+    private readonly AbstractEmitter? _emitter;
     private bool? _lastStringableKeys;
 
-    public void SetEmitter(AbstractEmitter emitter) => _emitter = emitter;
+    public DictionaryWriteHandler(AbstractEmitter? emitter = null) => _emitter = emitter;
+
+    public IWriteHandler BindTo(AbstractEmitter emitter) => new DictionaryWriteHandler(emitter);
 
     private bool StringableKeys(System.Collections.IDictionary d)
     {
