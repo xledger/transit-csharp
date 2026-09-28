@@ -30,10 +30,7 @@ internal abstract class AbstractEmitter : IEmitter
         while (baseType != null && baseType != typeof(object))
         {
             if (_handlers.TryGetValue(baseType, out var handler))
-            {
-                _handlerCache[type] = handler;
                 return handler;
-            }
             baseType = baseType.BaseType;
         }
         return null;
@@ -53,9 +50,6 @@ internal abstract class AbstractEmitter : IEmitter
             }
         }
 
-        if (found != null)
-            _handlerCache[type] = found;
-
         return found;
     }
 
@@ -71,16 +65,19 @@ internal abstract class AbstractEmitter : IEmitter
     {
         var type = obj?.GetType() ?? typeof(NullType);
 
-        if (_handlers.TryGetValue(type, out var handler))
+        if (_handlers.TryGetValue(type, out var handler) && handler is not IAbstractEmitterAware)
             return handler;
 
-        if (_handlerCache.TryGetValue(type, out handler))
-            return handler;
+        if (_handlerCache.TryGetValue(type, out var cached))
+            return cached;
 
-        handler = CheckBaseClasses(type)
+        handler ??= CheckBaseClasses(type)
                ?? CheckBaseGenericInterfaces(type)
                ?? CheckBaseInterfaces(type)
                ?? _defaultWriteHandler;
+
+        if (handler is IAbstractEmitterAware aware)
+            handler = aware.BindTo(this);
 
         _handlerCache[type] = handler;
         return handler;
