@@ -20,6 +20,8 @@ internal static class WriterFactory
     {
         var integerHandler = new IntegerWriteHandler("i");
         var listHandler = new ListWriteHandler();
+        var keywordHandler = new ToStringWriteHandler(":");
+        var symbolHandler = new ToStringWriteHandler("$");
         var dict = new Dictionary<Type, IWriteHandler>
         {
             [typeof(bool)] = new BooleanWriteHandler(),
@@ -35,8 +37,10 @@ internal static class WriterFactory
             [typeof(float)] = new FloatWriteHandler(),
             [typeof(double)] = new DoubleWriteHandler(),
             [typeof(char)] = new ToStringWriteHandler("c"),
-            [typeof(IKeyword)] = new ToStringWriteHandler(":"),
-            [typeof(ISymbol)] = new ToStringWriteHandler("$"),
+            [typeof(IKeyword)] = keywordHandler,
+            [typeof(Keyword)] = keywordHandler,
+            [typeof(ISymbol)] = symbolHandler,
+            [typeof(Symbol)] = symbolHandler,
             [typeof(byte[])] = new BinaryWriteHandler(),
             [typeof(Guid)] = new GuidWriteHandler(),
             [typeof(Uri)] = new ToStringWriteHandler("r"),
@@ -69,10 +73,49 @@ internal static class WriterFactory
 
     public static FrozenDictionary<Type, IWriteHandler> DefaultHandlers() => DefaultHandlersInstance;
 
+    // Keywords and symbols are registered by interface and by concrete struct, and the exact
+    // type wins during resolution. The structs are internal, so a caller can only override the
+    // interface -- without mirroring, the struct entry would silently shadow that override.
+    private static readonly (Type Interface, Type Concrete)[] KeywordLikeTypes =
+    {
+        (typeof(IKeyword), typeof(Keyword)),
+        (typeof(ISymbol), typeof(Symbol)),
+    };
+
+    private static bool NeedsKeywordMirroring(IReadOnlyDictionary<Type, IWriteHandler> handlers)
+    {
+        foreach (var (iface, concrete) in KeywordLikeTypes)
+        {
+            if (handlers.TryGetValue(iface, out var overridden)
+                && handlers.TryGetValue(concrete, out var current)
+                && !ReferenceEquals(overridden, current))
+                return true;
+        }
+        return false;
+    }
+
+    private static void MirrorKeywordOverrides(Dictionary<Type, IWriteHandler> handlers)
+    {
+        foreach (var (iface, concrete) in KeywordLikeTypes)
+        {
+            if (handlers.TryGetValue(iface, out var overridden))
+                handlers[concrete] = overridden;
+        }
+    }
+
     public static FrozenDictionary<Type, IWriteHandler> MergedHandlers(IDictionary<Type, IWriteHandler>? customHandlers)
     {
+        // A frozen table is the caller's own, taken verbatim unless an interface override in it
+        // would be shadowed -- which happens when the table was built from DefaultHandlers().
         if (customHandlers is FrozenDictionary<Type, IWriteHandler> frozen)
-            return frozen;
+        {
+            if (!NeedsKeywordMirroring(frozen))
+                return frozen;
+
+            var mirrored = frozen.ToDictionary();
+            MirrorKeywordOverrides(mirrored);
+            return mirrored.ToFrozenDictionary();
+        }
 
         if (customHandlers == null || customHandlers.Count == 0)
             return DefaultHandlersInstance;
@@ -80,6 +123,8 @@ internal static class WriterFactory
         var dict = DefaultHandlersInstance.ToDictionary();
         foreach (var kvp in customHandlers)
             dict[kvp.Key] = kvp.Value;
+        if (NeedsKeywordMirroring(dict))
+            MirrorKeywordOverrides(dict);
         return dict.ToFrozenDictionary();
     }
 

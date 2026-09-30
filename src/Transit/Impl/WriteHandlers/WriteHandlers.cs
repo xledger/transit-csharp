@@ -21,8 +21,15 @@ internal sealed class ToStringWriteHandler : AbstractWriteHandler
     private readonly string _tag;
     public ToStringWriteHandler(string tag) => _tag = tag;
     public override string Tag(object obj) => _tag;
-    public override object Representation(object obj) => Convert.ToString(obj, CultureInfo.InvariantCulture)!;
-    public override string? StringRepresentation(object obj) => Convert.ToString(obj, CultureInfo.InvariantCulture);
+    public override object Representation(object obj) => ToInvariantString(obj);
+    public override string? StringRepresentation(object obj) => ToInvariantString(obj);
+
+    private static string ToInvariantString(object obj) => obj switch
+    {
+        string s => s,
+        IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+        _ => obj.ToString()!,
+    };
 }
 
 internal sealed class IntegerWriteHandler : AbstractWriteHandler
@@ -175,20 +182,65 @@ internal sealed class DictionaryWriteHandler : AbstractWriteHandler, IAbstractEm
 {
     private readonly AbstractEmitter? _emitter;
     private bool? _lastStringableKeys;
+    private Type? _lastCheckedDictType;
+    private bool _canSkipFullKeyCheck;
 
     public DictionaryWriteHandler(AbstractEmitter? emitter = null) => _emitter = emitter;
 
     public IWriteHandler BindTo(AbstractEmitter emitter) => new DictionaryWriteHandler(emitter);
 
+    private static bool HasUntaggedNonNullableKeyType(Type dictType)
+    {
+        Type? keyType = null;
+        foreach (var i in dictType.GetInterfaces())
+        {
+            if (!i.IsGenericType || i.GetGenericTypeDefinition() != typeof(IDictionary<,>))
+                continue;
+            // Give up if dict inherits multiple concrete IDictionary<,> interfaces
+            if (keyType != null)
+                return false;
+            keyType = i.GetGenericArguments()[0];
+        }
+
+        return keyType is { IsValueType: true }
+            && Nullable.GetUnderlyingType(keyType) is null
+            // ITaggedValue is the one handler whose tag comes from the instance, not the type.
+            && !typeof(ITaggedValue).IsAssignableFrom(keyType);
+    }
+
     private bool StringableKeys(System.Collections.IDictionary d)
     {
+        var dictType = d.GetType();
+        if (dictType != _lastCheckedDictType)
+        {
+            _canSkipFullKeyCheck = HasUntaggedNonNullableKeyType(dictType);
+            _lastCheckedDictType = dictType;
+        }
+
+        // Held locally: a dictionary-valued key re-enters this method on the same bound
+        // instance and would leave the fields describing the inner dictionary.
+        var canSkipFullKeyCheck = _canSkipFullKeyCheck;
+
+        // Keys of the same runtime type resolve to the same handler, and every handler but
+        // TaggedValueWriteHandler derives its tag from the type rather than the instance, so
+        // one verdict covers every later key of that type.
+        Type? settled = null;
+
         foreach (var key in d.Keys)
         {
+            if (key is not null && key.GetType() == settled)
+                continue;
+
             var tag = _emitter!.GetTag(key);
             if (tag != null && tag.Length > 1)
                 return false;
             if (tag == null && key is not string)
                 return false;
+
+            if (canSkipFullKeyCheck)
+                return true;
+            if (key is not null and not ITaggedValue)
+                settled = key.GetType();
         }
         return true;
     }
