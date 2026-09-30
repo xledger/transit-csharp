@@ -53,7 +53,7 @@ internal sealed class JsonParser : AbstractParser
         return reader.TokenType switch
         {
             JsonTokenType.Number => ParseNumber(ref reader),
-            JsonTokenType.String => cache.CacheRead(reader.GetString()!, asDictionaryKey, this),
+            JsonTokenType.String => ReadString(ref reader, asDictionaryKey, cache),
             JsonTokenType.True => true,
             JsonTokenType.False => false,
             JsonTokenType.Null => null,
@@ -61,6 +61,19 @@ internal sealed class JsonParser : AbstractParser
             JsonTokenType.StartObject => ParseObject(ref reader, false, cache, null),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// A substitution code is resolved from the reader's raw UTF-8 where possible, since
+    /// materialising the two or three characters only to look them up is pure waste.
+    /// </summary>
+    private object? ReadString(ref Utf8JsonReader reader, bool asDictionaryKey, ReadCache cache)
+    {
+        if (!reader.HasValueSequence && !reader.ValueIsEscaped
+            && cache.TryReadCode(reader.ValueSpan, out var cached))
+            return cached;
+
+        return cache.CacheRead(reader.GetString()!, asDictionaryKey, this);
     }
 
     private static object ParseNumber(ref Utf8JsonReader reader)
@@ -91,10 +104,19 @@ internal sealed class JsonParser : AbstractParser
         while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
         {
             // TokenType should be PropertyName
-            var propName = reader.GetString()!;
-            reader.Read(); // Advance to value
-
-            var key = cache.CacheRead(propName, true, this);
+            object key;
+            if (!reader.HasValueSequence && !reader.ValueIsEscaped
+                && cache.TryReadCode(reader.ValueSpan, out var cachedKey))
+            {
+                reader.Read(); // Advance to value
+                key = cachedKey;
+            }
+            else
+            {
+                var propName = reader.GetString()!;
+                reader.Read(); // Advance to value
+                key = cache.CacheRead(propName, true, this);
+            }
             if (key is Tag tag)
             {
                 var tagStr = tag.GetValue();

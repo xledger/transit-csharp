@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Collections.Frozen;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace Transit.Net.Impl;
@@ -12,6 +14,9 @@ internal class JsonEmitter : AbstractEmitter
 {
     private static readonly long JsonIntMax = (long)Math.Pow(2, 53) - 1;
     private static readonly long JsonIntMin = -JsonIntMax;
+
+    // Emitted once per map and too short to be cacheable, so it is pre-encoded here instead.
+    private static readonly JsonEncodedText DirectoryAsList = JsonEncodedText.Encode(Constants.DirectoryAsList);
 
     internal readonly Utf8JsonWriter JsonWriter;
 
@@ -32,11 +37,51 @@ internal class JsonEmitter : AbstractEmitter
             JsonWriter.WriteNullValue();
     }
 
+    /// <summary>Longest prefix+tag+value composed on the stack rather than the heap.</summary>
+    private const int MaxComposedLength = 256;
+
     public override void EmitString(string? prefix, string? tag, string s, bool asDictionaryKey, WriteCache cache)
     {
-        var outString = cache.CacheWrite(Util.MaybePrefix(prefix, tag, s), asDictionaryKey);
-        JsonWriter.WriteStringValue(outString);
+        // A value already in the cache needs neither composing nor allocating.
+        if (cache.TryGetCode(prefix, tag, s, asDictionaryKey, out var code))
+        {
+            WriteText(code, asDictionaryKey);
+            return;
+        }
+
+        var plen = prefix?.Length ?? 0;
+        var tlen = tag?.Length ?? 0;
+        if (plen + tlen == 0)
+        {
+            WriteText(s, asDictionaryKey);
+            return;
+        }
+
+        WriteComposed(prefix, tag, s, asDictionaryKey);
     }
+
+    // Kept out of line so the stackalloc does not stop EmitString being inlined.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void WriteComposed(string? prefix, string? tag, string s, bool asDictionaryKey)
+    {
+        var plen = prefix!.Length;
+        var tlen = tag?.Length ?? 0;
+        var len = plen + tlen + s.Length;
+        if (len > MaxComposedLength)
+        {
+            WriteText(Util.MaybePrefix(prefix, tag, s), asDictionaryKey);
+            return;
+        }
+
+        Span<char> span = stackalloc char[len];
+        prefix.AsSpan().CopyTo(span);
+        tag.AsSpan().CopyTo(span[plen..]);
+        s.AsSpan().CopyTo(span[(plen + tlen)..]);
+        WriteText(span, asDictionaryKey);
+    }
+
+    protected virtual void WriteText(ReadOnlySpan<char> text, bool asDictionaryKey)
+        => JsonWriter.WriteStringValue(text);
 
     public override void EmitBoolean(bool b, bool asDictionaryKey, WriteCache cache)
     {
@@ -91,17 +136,12 @@ internal class JsonEmitter : AbstractEmitter
     public override void FlushWriter() => JsonWriter.Flush();
     public override bool PrefersStrings() => true;
 
-    protected override void EmitDictionary(IEnumerable<KeyValuePair<object, object>> keyValuePairs,
-        bool ignored, WriteCache cache)
+    protected override void EmitDictionary(IDictionary dict, bool ignored, WriteCache cache)
     {
         EmitListStart(0);
-        EmitString(null, null, Constants.DirectoryAsList, false, cache);
+        JsonWriter.WriteStringValue(DirectoryAsList);
 
-        foreach (var kvp in keyValuePairs)
-        {
-            Marshal(kvp.Key, true, cache);
-            Marshal(kvp.Value, false, cache);
-        }
+        MarshalEntries(dict, cache);
 
         EmitListEnd();
     }

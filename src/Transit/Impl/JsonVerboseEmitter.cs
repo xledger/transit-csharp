@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Frozen;
 using System.Text.Json;
 
@@ -13,32 +14,27 @@ internal class JsonVerboseEmitter : JsonEmitter
     {
     }
 
-    public override void EmitString(string? prefix, string? tag, string s, bool asDictionaryKey, WriteCache cache)
+    protected override void WriteText(ReadOnlySpan<char> text, bool asDictionaryKey)
     {
-        var outString = cache.CacheWrite(Util.MaybePrefix(prefix, tag, s), asDictionaryKey);
         if (asDictionaryKey)
-            JsonWriter.WritePropertyName(outString);
+            JsonWriter.WritePropertyName(text);
         else
-            JsonWriter.WriteStringValue(outString);
+            JsonWriter.WriteStringValue(text);
     }
 
-    protected override void EmitTagged(string t, object obj, bool ignored, WriteCache cache)
+    // Verbose writes a tagged value as a one-entry map rather than a two-element list
+    protected override void EmitTaggedStart(string t, WriteCache cache)
     {
         EmitDictionaryStart(1L);
         EmitString(Constants.EscTag, t, "", true, cache);
-        Marshal(obj, false, cache);
-        EmitDictionaryEnd();
     }
 
-    protected override void EmitDictionary(IEnumerable<KeyValuePair<object, object>> keyValuePairs,
-        bool ignored, WriteCache cache)
+    protected override void EmitTaggedEnd() => EmitDictionaryEnd();
+
+    protected override void EmitDictionary(IDictionary dict, bool ignored, WriteCache cache)
     {
         EmitDictionaryStart(0);
-        foreach (var kvp in keyValuePairs)
-        {
-            Marshal(kvp.Key, true, cache);
-            Marshal(kvp.Value, false, cache);
-        }
+        MarshalEntries(dict, cache);
         EmitDictionaryEnd();
     }
 }
