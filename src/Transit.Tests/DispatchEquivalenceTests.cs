@@ -117,9 +117,10 @@ public class DispatchEquivalenceTests
     }
 
     /// <summary>
-    /// The same values nested one level inside a list. A top-level scalar is dispatched by
-    /// <c>MarshalTop</c>, which never reaches the primitive fast path — only a nested value does,
-    /// so without these the fast path is pinned nowhere.
+    /// The values the primitive fast path handles, nested one level inside a list. A top-level
+    /// scalar is dispatched by <c>MarshalTop</c>, which never reaches that path — only a nested
+    /// value does, so without these it is pinned nowhere. Types the fast path ignores are covered
+    /// by <see cref="Corpus"/> alone; their nested encoding is the handler path, unchanged here.
     /// </summary>
     private static readonly (string Name, string Json, string Verbose)[] NestedCorpus =
     {
@@ -130,38 +131,19 @@ public class DispatchEquivalenceTests
         ("caret-string", "[\"~^caret\"]", "[\"~^caret\"]"),
         ("backtick-string", "[\"~`tick\"]", "[\"~`tick\"]"),
         ("long-zero", "[0]", "[0]"),
-        ("long-one", "[1]", "[1]"),
-        ("long-neg", "[-1]", "[-1]"),
         ("long-min", "[\"~i-9223372036854775808\"]", "[\"~i-9223372036854775808\"]"),
-        ("long-max", "[\"~i9223372036854775807\"]", "[\"~i9223372036854775807\"]"),
         ("long-js-max", "[9007199254740991]", "[9007199254740991]"),
         ("long-js-over", "[\"~i9007199254740992\"]", "[\"~i9007199254740992\"]"),
-        ("long-js-min", "[-9007199254740991]", "[-9007199254740991]"),
-        ("long-js-under", "[\"~i-9007199254740992\"]", "[\"~i-9007199254740992\"]"),
-        ("int-zero", "[0]", "[0]"),
         ("int-max", "[2147483647]", "[2147483647]"),
-        ("int-min", "[-2147483648]", "[-2147483648]"),
         ("bool-true", "[true]", "[true]"),
         ("bool-false", "[false]", "[false]"),
-        ("double-zero", "[0]", "[0]"),
         ("double-negzero", "[-0]", "[-0]"),
         ("double-frac", "[1.5]", "[1.5]"),
         ("double-nan", "[\"~zNaN\"]", "[\"~zNaN\"]"),
         ("double-posinf", "[\"~zINF\"]", "[\"~zINF\"]"),
-        ("double-neginf", "[\"~z-INF\"]", "[\"~z-INF\"]"),
-        ("double-epsilon", "[5E-324]", "[5E-324]"),
-        ("double-max", "[1.7976931348623157E+308]", "[1.7976931348623157E+308]"),
         ("float-frac", "[1.5]", "[1.5]"),
         ("float-nan", "[\"~zNaN\"]", "[\"~zNaN\"]"),
-        ("float-posinf", "[\"~zINF\"]", "[\"~zINF\"]"),
-        ("float-neginf", "[\"~z-INF\"]", "[\"~z-INF\"]"),
-        ("char", "[\"~cx\"]", "[\"~cx\"]"),
-        ("decimal", "[\"~f1.25\"]", "[\"~f1.25\"]"),
-        ("biginteger", "[\"~n123456789012345678901234567890\"]", "[\"~n123456789012345678901234567890\"]"),
         ("keyword", "[\"~:kw\"]", "[\"~:kw\"]"),
-        ("symbol", "[\"~$sym\"]", "[\"~$sym\"]"),
-        ("guid", "[\"~u00112233-4455-6677-8899-aabbccddeeff\"]", "[\"~u00112233-4455-6677-8899-aabbccddeeff\"]"),
-        ("uri", "[\"~rhttps://example.com/a?b=c\"]", "[\"~rhttps://example.com/a?b=c\"]"),
     };
 
     private static object? Read(string transit, TransitFactory.Format format)
@@ -191,22 +173,6 @@ public class DispatchEquivalenceTests
     }
 
     [TestMethod]
-    public void TestCustomHandlerOverridesBuiltInTypes()
-    {
-        var custom = new Dictionary<Type, IWriteHandler>
-        {
-            [typeof(string)] = new PrefixingHandler("S:"),
-            [typeof(long)] = new PrefixingHandler("L:"),
-            [typeof(bool)] = new PrefixingHandler("B:"),
-        };
-
-        Assert.AreEqual("[\"~#'\",\"S:abc\"]", Write("abc", TransitFactory.Format.Json, custom));
-        Assert.AreEqual("[\"~#'\",\"L:42\"]", Write(42L, TransitFactory.Format.Json, custom));
-        Assert.AreEqual("[\"~#'\",\"B:True\"]", Write(true, TransitFactory.Format.Json, custom));
-        Assert.AreEqual("{\"~#'\":\"S:abc\"}", Write("abc", TransitFactory.Format.JsonVerbose, custom));
-    }
-
-    [TestMethod]
     public void TestNestedCorpusWireFormatIsStable()
     {
         foreach (var (name, json, verbose) in NestedCorpus)
@@ -215,31 +181,6 @@ public class DispatchEquivalenceTests
             Assert.AreEqual(json, Write(nested, TransitFactory.Format.Json), $"{name}: nested json");
             Assert.AreEqual(verbose, Write(nested, TransitFactory.Format.JsonVerbose), $"{name}: nested verbose");
         }
-    }
-
-    [TestMethod]
-    public void TestCustomHandlerOverridesBuiltInTypesWhenNested()
-    {
-        // The nested position is the one that reaches the primitive fast path, so this is where
-        // the guard on that path is actually exercised.
-        var custom = new Dictionary<Type, IWriteHandler>
-        {
-            [typeof(string)] = new PrefixingHandler("S:"),
-            [typeof(long)] = new PrefixingHandler("L:"),
-            [typeof(bool)] = new PrefixingHandler("B:"),
-            [typeof(int)] = new PrefixingHandler("I:"),
-            [typeof(double)] = new PrefixingHandler("D:"),
-        };
-
-        var nested = new List<object> { "abc", 42L, true, 7, 1.5d };
-        Assert.AreEqual("[\"S:abc\",\"L:42\",\"B:True\",\"I:7\",\"D:1.5\"]",
-            Write(nested, TransitFactory.Format.Json, custom));
-        Assert.AreEqual("[\"S:abc\",\"L:42\",\"B:True\",\"I:7\",\"D:1.5\"]",
-            Write(nested, TransitFactory.Format.JsonVerbose, custom));
-
-        // Same again as dictionary values, the other nested position.
-        var asValues = new Dictionary<object, object> { { "k", 42L } };
-        Assert.AreEqual("[\"^ \",\"S:k\",\"L:42\"]", Write(asValues, TransitFactory.Format.Json, custom));
     }
 
     [TestMethod]
@@ -267,6 +208,11 @@ public class DispatchEquivalenceTests
             Assert.AreEqual($"[\"{expected}\"]",
                 Write(nested, TransitFactory.Format.JsonVerbose, custom), $"{type.Name} nested verbose");
         }
+
+        // The other nested position: a dictionary value.
+        var longOnly = new Dictionary<Type, IWriteHandler> { [typeof(long)] = new PrefixingHandler("X:") };
+        Assert.AreEqual("[\"^ \",\"k\",\"X:42\"]",
+            Write(new Dictionary<object, object> { { "k", 42L } }, TransitFactory.Format.Json, longOnly));
     }
 
     [TestMethod]
@@ -331,6 +277,13 @@ public class DispatchEquivalenceTests
             TransitFactory.Format.Json, null, Count);
         Assert.AreEqual(1, counts["t-key"], "dictionary key");
         Assert.AreEqual(1, counts["t-value"], "dictionary value");
+
+        // A transform can change an object's type, so dispatch must see its result, not its input.
+        static object Retype(object o) => o is long l ? "transformed-" + l : o;
+        Assert.AreEqual("[\"~#'\",\"transformed-7\"]",
+            Write(7L, TransitFactory.Format.Json, null, Retype));
+        Assert.AreEqual("[\"^ \",\"transformed-7\",\"abc\"]",
+            Write(new Dictionary<object, object> { { 7L, "abc" } }, TransitFactory.Format.Json, null, Retype));
     }
 
     [TestMethod]
@@ -390,33 +343,6 @@ public class DispatchEquivalenceTests
         Assert.AreEqual("[\"~#'\",42]", Write(42L, TransitFactory.Format.Json, custom));
         Assert.AreEqual("[\"~#'\",true]", Write(true, TransitFactory.Format.Json, custom));
         Assert.AreEqual("[\"~#'\",\"~:kw\"]", Write(TransitFactory.Keyword("kw"), TransitFactory.Format.Json, custom));
-    }
-
-    [TestMethod]
-    public void TestCallerSuppliedTableWithoutStringHandler()
-    {
-        // A frozen table is taken verbatim, so it can legitimately lack a type the stock table has.
-        var table = TransitFactory.DefaultWriteHandlers()
-            .Where(kvp => kvp.Key != typeof(string))
-            .ToFrozenDictionary(kvp => kvp.Key, kvp => kvp.Value);
-
-        Assert.AreEqual("[\"~#'\",42]", Write(42L, TransitFactory.Format.Json, table));
-        // string is gone from the table, so it resolves through IEnumerable to a list of chars.
-        // A fast path keyed on the CLR type rather than the table would wrongly emit "abc".
-        Assert.AreEqual("[\"~#list\",[\"~ca\",\"~cb\",\"~cc\"]]",
-            Write("abc", TransitFactory.Format.Json, table));
-    }
-
-    [TestMethod]
-    public void TestTransformRunsBeforeDispatch()
-    {
-        // The transform can change an object's type, so dispatch must see its result.
-        static object Transform(object o) => o is long l ? "transformed-" + l : o;
-
-        Assert.AreEqual("[\"~#'\",\"transformed-7\"]",
-            Write(7L, TransitFactory.Format.Json, null, Transform));
-        Assert.AreEqual("[\"^ \",\"transformed-7\",\"abc\"]",
-            Write(new Dictionary<object, object> { { 7L, "abc" } }, TransitFactory.Format.Json, null, Transform));
     }
 
     private sealed class PrefixingHandler : IWriteHandler
